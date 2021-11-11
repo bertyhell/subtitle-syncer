@@ -1,3 +1,7 @@
 .idea/
 node_modules/
 vosk-speech-model/
+build/
+dist/
+ffmpeg/ffmpeg.exe
+run.bat

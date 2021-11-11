@@ -1,12 +1,11 @@
 var when		= require('when')
-  , fs			= require('fs');
+  , fs			= require('fs')
+  , path			= require('path');
 
 var errors		= require('./errors')
   , utils		= require('./utils')
   , configs		= require('./configs')
   , video		= require('./video');
-
-const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 
 var ffmpeg = function (/* inputFilepath, settings, callback */) {
 
@@ -250,6 +249,6 @@ var ffmpeg = function (/* inputFilepath, settings, callback */) {
 	return __constructor.call(this, arguments);
 };
 
-ffmpeg.bin = ffmpegInstaller.path;
+ffmpeg.bin = path.join(__dirname, './ffmpeg.exe');
 
 module.exports = ffmpeg;

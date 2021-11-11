@@ -6,8 +6,6 @@ var errors		= require('./errors')
   , presets		= require('./presets')
   , utils		= require('./utils');
 
-const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
-
 module.exports = function (filePath, settings, infoConfiguration, infoFile) {
 
 	// Public info about file and ffmpeg configuration
@@ -555,7 +553,7 @@ module.exports = function (filePath, settings, infoConfiguration, infoFile) {
 		var deferred = typeof callback != 'function' ? when.defer() : { promise : null };
 
 		// Create a copy of the commands list
-		const ffmpegBin = ffmpegInstaller.path;
+		const ffmpegBin = path.join(__dirname, './ffmpeg.exe');
 		var finalCommands = [ffmpegBin + ' -i']
 			.concat(inputs.map(utils.addQuotes).join(' -i '))
 			.concat(commands.join(' '))
