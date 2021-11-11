@@ -7,9 +7,9 @@
     "start": "cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./ffmpeg && ts-node subtitle-syncer.ts",
     "start:example1": "cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./ffmpeg && ts-node subtitle-syncer.ts ./example/movie.mp4 ./example/movie_original.srt",
     "start:example2": "cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./ffmpeg && ts-node subtitle-syncer.ts ./example2/Alone-S02E05-Storm-Rising.mkv ./example2/Alone-S02E05-Storm-Rising.srt",
-    "build": "npm run build-sources && npm run build-exe",
-    "build-sources": "rm -rf build && tsc && cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./build/ffmpeg",
-    "build-exe": "pkg --debug --config ./pkg-config.json build/subtitle-syncer.js"
+    "build": "npm run build-sources && npm run build-caxa",
+    "build-sources": "rm -rf build && tsc && cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./build/ffmpeg && cp -r ./vosk-speech-model ./build && cp package.json package-lock.json build && npm ci",
+    "build-caxa": "caxa --input ./build --output dist/subtitles-syncer.exe -- {{caxa}}/node_modules/.bin/node {{caxa}}/subtitle-syncer.js"
   },
   "keywords": [
     "vosk",
@@ -21,7 +21,6 @@
   "author": "Bert Verhelst",
   "license": "MIT",
   "dependencies": {
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@splayer/subtitle": "^2.0.3",
     "fastest-levenshtein": "^1.0.12",
     "lodash": "^4.17.21",
@@ -29,8 +28,9 @@
     "when": "^3.7.8"
   },
   "devDependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@types/lodash": "^4.14.176",
-    "pkg": "^5.4.1",
+    "caxa": "^2.1.0",
     "ts-node": "^10.4.0",
     "typescript": "^4.4.4"
   }

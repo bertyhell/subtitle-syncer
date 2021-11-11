@@ -2,7 +2,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { default as vosk } from 'vosk';
 import ffmpeg from './ffmpeg/ffmpeg';
-import { cloneDeep, last, uniq } from 'lodash';
+import { cloneDeep, compact, last, uniq } from 'lodash';
 import { parse, stringify } from '@splayer/subtitle';
 import { distance } from 'fastest-levenshtein';
 import { range } from './utils/lerp';
@@ -140,7 +140,7 @@ async function audioToSubtitle(audioPath: string, grammarList?: string[], maxWor
 function srtToGrammarList(srtEntries: SubtitleEntry[]): { grammarList: string[], maxWordCount: number } {
 	let maxWordCount = 7;
 	const grammarList = uniq(srtEntries.map(srtEntry => {
-		const words = srtEntry.text.toLowerCase().replace(/[^0-9a-z\s]+/g, ' ').split(' ');
+		const words = srtEntry.text.toLowerCase().replace(/[^0-9a-z\s\n]+/g, ' ').split(' ');
 		if (words.length > maxWordCount) {
 			maxWordCount = words.length;
 		}
@@ -209,11 +209,8 @@ function reSyncSubtitle(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated
 
 async function videoToSubtitleFile(): Promise<string> {
 	// parse args
-	const args = process.argv.filter(arg => !arg.endsWith('.js') && !arg.endsWith('.ts'));
+	const args = compact([process.argv.pop(), process.argv.pop()]);
 	const errorArgs = 'Expected 2 files: the video (.mp4) and the subtitle file to sync (.srt). Received: [' + args.join(', ') + ']';
-	if (args.length !== 2) {
-		throw errorArgs;
-	}
 
 	let subtitlePathOriginal = args.find(arg => arg.endsWith('.srt'));
 	let videoPath = args.find(arg => !arg.endsWith('.srt'));
