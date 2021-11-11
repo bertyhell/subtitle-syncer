@@ -3,8 +3,14 @@ import fs from 'fs-extra';
 import { spawn } from 'child_process';
 import { default as vosk } from 'vosk';
 import ffmpeg from './ffmpeg/ffmpeg';
-import { uniq } from 'lodash';
-import { parse, stringify } from '@splayer/subtitle'
+import { cloneDeep, uniq } from 'lodash';
+import { parse, stringify } from '@splayer/subtitle';
+import { distance } from 'fastest-levenshtein';
+import { range } from './utils/lerp';
+import { indexOfMin } from './utils/index-of-min';
+
+const TEXT_DISTANCE_PENALTY = 1;
+const OUT_OF_SYNC_PENALTY = 1;
 
 interface SubtitleEntry {
 	start: number;
@@ -38,12 +44,11 @@ async function videoToAudio(videoPath: string): Promise<string> {
 	return wavPath;
 }
 
-async function audioToSubtitle(audioPath: string, grammarList?: string[]): Promise<SubtitleEntry[]> {
+async function audioToSubtitle(audioPath: string, grammarList?: string[], maxWordsPerLine: number = 7): Promise<SubtitleEntry[]> {
 	return new Promise<SubtitleEntry[]>(async (resolve, reject) => {
 		const MODEL_PATH = path.resolve('./vosk-speech-model');
 		const SAMPLE_RATE = 16000;
 		const BUFFER_SIZE = 4000;
-		const WORDS_PER_LINE = 7;
 
 		if (!(await fs.pathExists(MODEL_PATH))) {
 			reject('Please download the model from https://alphacephei.com/vosk/models and unpack as ' + MODEL_PATH + ' in the current folder.');
@@ -88,7 +93,7 @@ async function audioToSubtitle(audioPath: string, grammarList?: string[]): Promi
 				let text = words[0].word + ' ';
 				for (let i = 1; i < words.length; i++) {
 					text += words[i].word + ' ';
-					if (i % WORDS_PER_LINE == 0) {
+					if (i % maxWordsPerLine == 0) {
 						subs.push({
 							start: words[start_index].start * 1000,
 							end: words[i].end * 1000,
@@ -111,29 +116,110 @@ async function audioToSubtitle(audioPath: string, grammarList?: string[]): Promi
 	});
 }
 
-function srtToGrammarList(srtEntries: SubtitleEntry[]): string[] {
-	return uniq(srtEntries.map(srtEntry => {
-		return srtEntry.text.toLowerCase().replace(/[?!,;:.\s]+/g, ' ').split(' ');
+/**
+ * Extracts a list of words used in the original subtitle file
+ * This will be used to limit the speech recognition to only output these words
+ *
+ * A max word count is also calculated for the same reason
+ * @param srtEntries
+ */
+function srtToGrammarList(srtEntries: SubtitleEntry[]): {grammarList: string[], maxWordCount: number} {
+	let maxWordCount = 7;
+	const grammarList = uniq(srtEntries.map(srtEntry => {
+		const words = srtEntry.text.toLowerCase().replace(/[?!,;:.\s]+/g, ' ').split(' ');
+		if (words.length > maxWordCount) {
+			maxWordCount = words.length;
+		}
+		return words;
 	}).flat());
+	return {
+		grammarList,
+		maxWordCount,
+	}
+}
+
+/**
+ * Returns a mapping function to map a value in one range to a value in another range using linear interpolation
+ * @param srtEntriesOriginal
+ * @param srtEntriesGenerated
+ */
+function getIndexMappingFunction(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated: SubtitleEntry[]): (value: number) => number {
+	return (value: number): number => {
+		return range(0, srtEntriesOriginal.length, 0, srtEntriesGenerated.length, value);
+	};
+}
+
+/**
+ * Compares text of the current subtitle entry with all generated text entries and calculates a match score (higher is worse) based on
+ * - Levenshtein distance
+ * - distance of the expected subtitle position (since subtitles should remain in the same order)
+ * @param entry
+ * @param entryIndex
+ * @param srtEntriesGenerated
+ * @param mapIndexFunc
+ */
+function findEntryWithBestTextMatch(entry: SubtitleEntry, entryIndex: number, srtEntriesGenerated: SubtitleEntry[], mapIndexFunc: (index: number) => number) {
+	// Calculate scores
+	const scores = new Array(srtEntriesGenerated.length);
+	srtEntriesGenerated.forEach((entryGenerated, generatedEntryIndex: number) => {
+		const dist = distance(entryGenerated.text, entry.text);
+		const estimatedIndex = mapIndexFunc(entryIndex);
+		scores[generatedEntryIndex] =
+			(dist / entry.text.length * TEXT_DISTANCE_PENALTY) +
+			(Math.abs(estimatedIndex - generatedEntryIndex) * OUT_OF_SYNC_PENALTY);
+	});
+
+	// Pick the entry with the lowest score
+	const lowestIndex = indexOfMin(scores);
+	return srtEntriesGenerated[lowestIndex];
+}
+
+function reSyncSubtitle(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated: SubtitleEntry[]): SubtitleEntry[] {
+	// The generated subtitle file can contain more or less entries than the original
+	// This function will translate the index of the original file (eg: 5th entry) to the expected index in the generated file (eg: 5.67) if the generated file has a few more entries
+	const mapIndexFunc = getIndexMappingFunction(srtEntriesOriginal, srtEntriesGenerated);
+
+	const srtEntriesSynced = cloneDeep(srtEntriesOriginal);
+	srtEntriesOriginal.forEach((entryOriginal, index) => {
+		const srtEntryGeneratedWithClosesTextMatch = findEntryWithBestTextMatch(entryOriginal, index, srtEntriesGenerated, mapIndexFunc);
+
+		// Map centers of start and end time generated to center of start and end time original
+		const centerOfGenerated = srtEntryGeneratedWithClosesTextMatch.start + (srtEntryGeneratedWithClosesTextMatch.end - srtEntryGeneratedWithClosesTextMatch.start) / 2
+		const lengthOfOriginal = entryOriginal.end - entryOriginal.start;
+		srtEntriesSynced[index].start = centerOfGenerated - lengthOfOriginal / 2;
+		srtEntriesSynced[index].end = centerOfGenerated + lengthOfOriginal / 2;
+	});
+
+	return srtEntriesSynced;
 }
 
 async function videoToSubtitleFile() {
+	// Extract WAV audio from video file
 	const videoPath = path.resolve('./example/movie.mp4');
-
 	const audioPath = convertPathToExtension(videoPath, '.wav');
 	// const audioPath = await videoToAudio(videoPath);
 
-	const originalSrtContent = (await fs.readFile(path.resolve('./example/movie_original.srt'))).toString('utf-8');
-	const srtFileOriginal = await parse(originalSrtContent);
-	const grammarListOriginal = srtToGrammarList(srtFileOriginal);
+	// Parse original srt with bad timings but good grammar (original)
+	const srtContentOriginal = (await fs.readFile(path.resolve('./example/movie_original.srt'))).toString('utf-8');
+	const srtEntriesOriginal = await parse(srtContentOriginal);
 
-	const newSrtEntries = await audioToSubtitle(audioPath, grammarListOriginal);
-	const subtitlePath = convertPathToExtension(videoPath, '_generated.srt');
+	// Generate new srt with good timing but bad grammar
+	const grammarListOriginalResult = srtToGrammarList(srtEntriesOriginal);
+	const srtEntriesGenerated = await audioToSubtitle(audioPath, grammarListOriginalResult.grammarList, grammarListOriginalResult.maxWordCount);
 
-	const newSrtContent = stringify(newSrtEntries);
-	fs.writeFileSync(subtitlePath, newSrtContent, { encoding: 'utf-8' });
-	console.log('file written to: ' + subtitlePath);
-	console.log('subtitle content: ' + newSrtContent);
+	// Write srt file with bad grammar and good timing (generated)
+	const srtContentGenerated = stringify(srtEntriesGenerated);
+	const subtitlePathGenerated = convertPathToExtension(videoPath, '_generated.srt');
+	fs.writeFileSync(subtitlePathGenerated, srtContentGenerated, { encoding: 'utf-8' });
+
+	// Map the good grammar from the original onto the good timing from the generated srt
+	const srtEntriesSynced = reSyncSubtitle(srtEntriesOriginal, srtEntriesGenerated);
+
+	// Write srt file with good grammar and good timing (synced)
+	const srtContentSynced = stringify(srtEntriesSynced);
+	const subtitlePathSynced = convertPathToExtension(videoPath, '_synced.srt');
+	fs.writeFileSync(subtitlePathSynced, srtContentSynced, { encoding: 'utf-8' });
+	console.log('file written to: ' + subtitlePathSynced);
 
 }
 
