@@ -1,28 +1,15 @@
 import * as path from 'path';
 import fs from 'fs-extra';
 import { spawn } from 'child_process';
-import { stringifySync } from 'subtitle';
 import { default as vosk } from 'vosk';
 import ffmpeg from './ffmpeg/ffmpeg';
-import srt from 'srt';
 import { uniq } from 'lodash';
-
-interface SrtSubtitleEntry {
-	startTime: number;
-	endTime: number;
-	text: string;
-	number: number;
-}
-
-type SrtSubtitleFile = Record<string, SrtSubtitleEntry>
+import { parse, stringify } from '@splayer/subtitle'
 
 interface SubtitleEntry {
-	type: 'cue';
-	data: {
-		start: number;
-		end: number;
-		text: string;
-	};
+	start: number;
+	end: number;
+	text: string;
 }
 
 interface SttResult {
@@ -51,9 +38,8 @@ async function videoToAudio(videoPath: string): Promise<string> {
 	return wavPath;
 }
 
-async function audioToSubtitle(audioPath: string, grammarList?: string[]): Promise<string> {
-	return new Promise<string>(async (resolve, reject) => {
-
+async function audioToSubtitle(audioPath: string, grammarList?: string[]): Promise<SubtitleEntry[]> {
+	return new Promise<SubtitleEntry[]>(async (resolve, reject) => {
 		const MODEL_PATH = path.resolve('./vosk-speech-model');
 		const SAMPLE_RATE = 16000;
 		const BUFFER_SIZE = 4000;
@@ -92,12 +78,9 @@ async function audioToSubtitle(audioPath: string, grammarList?: string[]): Promi
 				const words = element.result;
 				if (words.length == 1) {
 					subs.push({
-						type: 'cue',
-						data: {
-							start: words[0].start,
-							end: words[0].end,
-							text: words[0].word
-						}
+						start: words[0].start * 1000,
+						end: words[0].end * 1000,
+						text: words[0].word
 					});
 					return;
 				}
@@ -107,12 +90,9 @@ async function audioToSubtitle(audioPath: string, grammarList?: string[]): Promi
 					text += words[i].word + ' ';
 					if (i % WORDS_PER_LINE == 0) {
 						subs.push({
-							type: 'cue',
-							data: {
-								start: words[start_index].start,
-								end: words[i].end,
-								text: text.slice(0, text.length - 1)
-							}
+							start: words[start_index].start * 1000,
+							end: words[i].end * 1000,
+							text: text.slice(0, text.length - 1)
 						});
 						start_index = i;
 						text = '';
@@ -120,34 +100,19 @@ async function audioToSubtitle(audioPath: string, grammarList?: string[]): Promi
 				}
 				if (start_index != words.length - 1) {
 					subs.push({
-						type: 'cue',
-						data: {
-							start: words[start_index].start,
-							end: words[words.length - 1].end,
-							text: text
-						}
+						start: words[start_index].start * 1000,
+						end: words[words.length - 1].end * 1000,
+						text: text
 					});
 				}
 			});
-			resolve(stringifySync(subs, { format: 'SRT' }));
+			resolve(subs);
 		});
 	});
 }
 
-async function parseSrtFile(srtPath: string): Promise<SrtSubtitleFile> {
-	return new Promise<SrtSubtitleFile>((resolve, reject) => {
-		srt(srtPath, (err: Error, data: SrtSubtitleFile) => {
-			if (err) {
-				reject(err);
-			} else {
-				resolve(data);
-			}
-		});
-	});
-}
-
-function srtToGrammarList(srtFile: SrtSubtitleFile): string[] {
-	return uniq(Object.values(srtFile).map(srtEntry => {
+function srtToGrammarList(srtEntries: SubtitleEntry[]): string[] {
+	return uniq(srtEntries.map(srtEntry => {
 		return srtEntry.text.toLowerCase().replace(/[?!,;:.\s]+/g, ' ').split(' ');
 	}).flat());
 }
@@ -158,14 +123,17 @@ async function videoToSubtitleFile() {
 	const audioPath = convertPathToExtension(videoPath, '.wav');
 	// const audioPath = await videoToAudio(videoPath);
 
-	const srtFileOriginal = await parseSrtFile(path.resolve('./example/movie_original.srt'));
+	const originalSrtContent = (await fs.readFile(path.resolve('./example/movie_original.srt'))).toString('utf-8');
+	const srtFileOriginal = await parse(originalSrtContent);
 	const grammarListOriginal = srtToGrammarList(srtFileOriginal);
 
-	const subtitleContent = await audioToSubtitle(audioPath, grammarListOriginal);
+	const newSrtEntries = await audioToSubtitle(audioPath, grammarListOriginal);
 	const subtitlePath = convertPathToExtension(videoPath, '_generated.srt');
-	fs.writeFileSync(subtitlePath, subtitleContent, { encoding: 'utf-8' });
+
+	const newSrtContent = stringify(newSrtEntries);
+	fs.writeFileSync(subtitlePath, newSrtContent, { encoding: 'utf-8' });
 	console.log('file written to: ' + subtitlePath);
-	console.log('subtitle content: ' + subtitleContent);
+	console.log('subtitle content: ' + newSrtContent);
 
 }
 

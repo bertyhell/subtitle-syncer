@@ -1,3 +1,4 @@
 declare module 'vosk';
-declare module 'srt';
+declare module '@splayer/subtitle';
+
 declare module './ffmpeg/ffmpeg.js';
