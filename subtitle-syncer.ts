@@ -50,7 +50,7 @@ async function videoToAudio(videoPath: string): Promise<{ wavPath: string, durat
 
 async function audioToSubtitle(audioPath: string, grammarList?: string[], maxWordsPerLine: number = 7, duration?: number): Promise<SubtitleEntry[]> {
 	return new Promise<SubtitleEntry[]>(async (resolve, reject) => {
-		const MODEL_PATH = path.resolve('./vosk-speech-model');
+		const MODEL_PATH = path.join(__dirname, 'vosk-speech-model');
 		const SAMPLE_RATE = 16000;
 		const BUFFER_SIZE = 4000;
 
@@ -140,7 +140,7 @@ async function audioToSubtitle(audioPath: string, grammarList?: string[], maxWor
 function srtToGrammarList(srtEntries: SubtitleEntry[]): { grammarList: string[], maxWordCount: number } {
 	let maxWordCount = 7;
 	const grammarList = uniq(srtEntries.map(srtEntry => {
-		const words = srtEntry.text.toLowerCase().replace(/[^0-9a-z\s\n]+/g, ' ').split(' ');
+		const words = srtEntry.text.toLowerCase().replace(/([^0-9a-z\s]|\n)+/g, ' ').split(' ');
 		if (words.length > maxWordCount) {
 			maxWordCount = words.length;
 		}
@@ -238,6 +238,7 @@ async function videoToSubtitleFile(): Promise<string> {
 	console.log('Generating subtitle file from audio...');
 	const grammarListOriginalResult = srtToGrammarList(srtEntriesOriginal);
 	const srtEntriesGenerated = await audioToSubtitle(audioPath, grammarListOriginalResult.grammarList, grammarListOriginalResult.maxWordCount, duration);
+	await rmSilent(audioPath);
 	console.log('Generating subtitle file from audio...done');
 
 	// Write srt file with bad grammar and good timing (generated)
