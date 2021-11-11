@@ -58,14 +58,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-var ffmpeg_1 = __importDefault(require("ffmpeg"));
-var ffmpeg_2 = __importDefault(require("@ffmpeg-installer/ffmpeg"));
 var path = __importStar(require("path"));
 var fs_extra_1 = __importDefault(require("fs-extra"));
 var child_process_1 = require("child_process");
 var subtitle_1 = require("subtitle");
 var vosk_1 = __importDefault(require("vosk"));
-ffmpeg_1.default.bin = ffmpeg_2.default.path;
+var ffmpeg_1 = __importDefault(require("./ffmpeg/ffmpeg"));
+function convertPathToExtension(filePath, newExtension) {
+    return path.join(path.dirname(filePath), path.basename(filePath, path.extname(filePath)) + '.' + newExtension);
+}
 function videoToAudio(videoPath) {
     return __awaiter(this, void 0, void 0, function () {
         var video, wavPath;
@@ -74,7 +75,7 @@ function videoToAudio(videoPath) {
                 case 0: return [4 /*yield*/, new ffmpeg_1.default(videoPath)];
                 case 1:
                     video = _a.sent();
-                    wavPath = path.join(path.dirname(videoPath), path.basename(videoPath) + '.wav');
+                    wavPath = convertPathToExtension(videoPath, 'wav');
                     // ffmpeg -i input.mp4 -vn -acodec pcm_s16le -ar 44100 -ac 2 output.wav
                     video.addCommand('-vn', '');
                     video.addCommand('-acodec', 'pcm_s16le');
@@ -111,7 +112,7 @@ function audioToSubtitle(audioPath) {
                                 model = new vosk_1.default.Model(MODEL_PATH);
                                 rec = new vosk_1.default.Recognizer({ model: model, sampleRate: SAMPLE_RATE });
                                 rec.setWords(true);
-                                ffmpeg_run = child_process_1.spawn('ffmpeg', ['-loglevel', 'quiet', '-i', audioPath,
+                                ffmpeg_run = (0, child_process_1.spawn)('ffmpeg', ['-loglevel', 'quiet', '-i', audioPath,
                                     '-ar', String(SAMPLE_RATE), '-ac', '1',
                                     '-f', 's16le', '-bufsize', String(BUFFER_SIZE), '-']);
                                 subs = [];
@@ -169,7 +170,7 @@ function audioToSubtitle(audioPath) {
                                             });
                                         }
                                     });
-                                    resolve(subtitle_1.stringifySync(subs, { format: 'SRT' }));
+                                    resolve((0, subtitle_1.stringifySync)(subs, { format: 'SRT' }));
                                 });
                                 return [2 /*return*/];
                         }
@@ -197,11 +198,11 @@ function videoToSubtitleFile() {
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
-                    videoPath = path.resolve('./test.mp4');
+                    videoPath = path.resolve('./example/movie.mp4');
                     return [4 /*yield*/, videoToSubtitle(videoPath)];
                 case 1:
                     subtitleContent = _a.sent();
-                    subtitlePath = path.join(path.dirname(videoPath), path.basename(videoPath) + '.srt');
+                    subtitlePath = convertPathToExtension(videoPath, 'srt');
                     return [4 /*yield*/, fs_extra_1.default.writeFile(subtitlePath, subtitleContent, { encoding: 'utf-8' })];
                 case 2:
                     _a.sent();

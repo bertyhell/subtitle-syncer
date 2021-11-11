@@ -1,2 +1,3 @@
 declare module 'vosk';
-declare module 'ffmpeg';
+declare module 'srt';
+declare module './ffmpeg/ffmpeg.js';

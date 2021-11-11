@@ -18,13 +18,16 @@
   "license": "MIT",
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "ffmpeg": "git+https://git@github.com/dride/node-ffmpeg.git",
     "fs-extra": "^10.0.0",
+    "lodash": "^4.17.21",
+    "srt": "^0.0.3",
     "subtitle": "^4.1.1",
-    "vosk": "^0.3.32"
+    "vosk": "^0.3.32",
+    "when": "^3.7.8"
   },
   "devDependencies": {
     "@types/fs-extra": "^9.0.13",
+    "@types/lodash": "^4.14.176",
     "ts-node": "^10.4.0",
     "typescript": "^4.4.4"
   }
