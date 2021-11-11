@@ -4,8 +4,12 @@
   "description": "Sync existing subtitles to an existing video by converting the audio to speech and then matching the subtitles as good as possible",
   "main": "subtitle-syncer.ts",
   "scripts": {
-    "start": "cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./ffmpeg && ts-node subtitle-syncer.ts \"./example/movie.mp4\" \"./example/movie_original.srt\"",
-    "build": "rm -rf build && tsc && cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./build/ffmpeg && pkg --debug --config ./pkg-config.json build/subtitle-syncer.js"
+    "start": "cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./ffmpeg && ts-node subtitle-syncer.ts",
+    "start:example1": "cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./ffmpeg && ts-node subtitle-syncer.ts ./example/movie.mp4 ./example/movie_original.srt",
+    "start:example2": "cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./ffmpeg && ts-node subtitle-syncer.ts ./example2/Alone-S02E05-Storm-Rising.mkv ./example2/Alone-S02E05-Storm-Rising.srt",
+    "build": "npm run build-sources && npm run build-exe",
+    "build-sources": "rm -rf build && tsc && cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./build/ffmpeg",
+    "build-exe": "pkg --debug --config ./pkg-config.json build/subtitle-syncer.js"
   },
   "keywords": [
     "vosk",

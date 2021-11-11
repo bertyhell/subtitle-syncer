@@ -2,14 +2,14 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { default as vosk } from 'vosk';
 import ffmpeg from './ffmpeg/ffmpeg';
-import { cloneDeep, uniq } from 'lodash';
+import { cloneDeep, last, uniq } from 'lodash';
 import { parse, stringify } from '@splayer/subtitle';
 import { distance } from 'fastest-levenshtein';
 import { range } from './utils/lerp';
 import { indexOfMin } from './utils/index-of-min';
 import { waitForKeypress } from './utils/wait-for-key-press';
 import { pathExists, rmSilent } from './utils/fs';
-import { readFile, writeFile } from 'fs/promises';
+import { readFileSync, writeFileSync } from 'fs';
 
 const TEXT_DISTANCE_PENALTY = 1;
 const OUT_OF_SYNC_PENALTY = 1;
@@ -32,7 +32,7 @@ function convertPathToExtension(filePath: string, newSuffix: string): string {
 	return path.join(path.dirname(filePath), path.basename(filePath, path.extname(filePath)) + newSuffix);
 }
 
-async function videoToAudio(videoPath: string): Promise<string> {
+async function videoToAudio(videoPath: string): Promise<{ wavPath: string, duration: number }> {
 	const video = await new (ffmpeg as any)(videoPath);
 	const wavPath = convertPathToExtension(videoPath, '.wav');
 
@@ -45,10 +45,10 @@ async function videoToAudio(videoPath: string): Promise<string> {
 	video.addCommand('-ac', '2');
 	await video.save(wavPath);
 
-	return wavPath;
+	return { wavPath, duration: video?.metadata?.duration?.seconds };
 }
 
-async function audioToSubtitle(audioPath: string, grammarList?: string[], maxWordsPerLine: number = 7): Promise<SubtitleEntry[]> {
+async function audioToSubtitle(audioPath: string, grammarList?: string[], maxWordsPerLine: number = 7, duration?: number): Promise<SubtitleEntry[]> {
 	return new Promise<SubtitleEntry[]>(async (resolve, reject) => {
 		const MODEL_PATH = path.resolve('./vosk-speech-model');
 		const SAMPLE_RATE = 16000;
@@ -70,7 +70,17 @@ async function audioToSubtitle(audioPath: string, grammarList?: string[], maxWor
 
 		const subs: SubtitleEntry[] = [];
 		const results: SttResult[] = [];
+		let lastPercentageOutput = 0;
 		ffmpeg_run.stdout.on('data', (stdout: unknown) => {
+			const currentTime = last(results)?.result?.[0]?.end;
+			if (currentTime && duration) {
+				// Calculate percentage completed
+				const newPercentage = Math.round(currentTime / duration * 100);
+				if (newPercentage !== lastPercentageOutput) {
+					console.log(newPercentage + '%');
+					lastPercentageOutput = newPercentage;
+				}
+			}
 			if (rec.acceptWaveform(stdout)) {
 				results.push(rec.result());
 			}
@@ -130,7 +140,7 @@ async function audioToSubtitle(audioPath: string, grammarList?: string[], maxWor
 function srtToGrammarList(srtEntries: SubtitleEntry[]): { grammarList: string[], maxWordCount: number } {
 	let maxWordCount = 7;
 	const grammarList = uniq(srtEntries.map(srtEntry => {
-		const words = srtEntry.text.toLowerCase().replace(/[?!,;:.\s]+/g, ' ').split(' ');
+		const words = srtEntry.text.toLowerCase().replace(/[^0-9a-z\s]+/g, ' ').split(' ');
 		if (words.length > maxWordCount) {
 			maxWordCount = words.length;
 		}
@@ -218,26 +228,26 @@ async function videoToSubtitleFile(): Promise<string> {
 
 	// Extract WAV audio from video file
 	console.log('Extracting audio from video...');
-	const audioPath = await videoToAudio(videoPath);
+	const { wavPath: audioPath, duration } = await videoToAudio(videoPath);
 	console.log('Extracting audio from video...done');
 
 	// Parse original srt with bad timings but good grammar (original)
 	console.log('Parsing subtitle file...');
-	const srtContentOriginal = (await readFile(subtitlePathOriginal)).toString('utf-8');
+	const srtContentOriginal = (await readFileSync(subtitlePathOriginal)).toString('utf-8');
 	const srtEntriesOriginal = await parse(srtContentOriginal);
 	console.log('Parsing subtitle file...done');
 
 	// Generate new srt with good timing but bad grammar
 	console.log('Generating subtitle file from audio...');
 	const grammarListOriginalResult = srtToGrammarList(srtEntriesOriginal);
-	const srtEntriesGenerated = await audioToSubtitle(audioPath, grammarListOriginalResult.grammarList, grammarListOriginalResult.maxWordCount);
+	const srtEntriesGenerated = await audioToSubtitle(audioPath, grammarListOriginalResult.grammarList, grammarListOriginalResult.maxWordCount, duration);
 	console.log('Generating subtitle file from audio...done');
 
 	// Write srt file with bad grammar and good timing (generated)
 	console.log('Writing generated subtitle from audio to file...');
 	const srtContentGenerated = stringify(srtEntriesGenerated);
 	const subtitlePathGenerated = convertPathToExtension(subtitlePathOriginal, '_generated.srt');
-	await writeFile(subtitlePathGenerated, srtContentGenerated, { encoding: 'utf-8' });
+	writeFileSync(subtitlePathGenerated, srtContentGenerated, { encoding: 'utf-8' });
 	console.log('Writing generated subtitle from audio to file...done');
 
 	// Map the good grammar from the original onto the good timing from the generated srt
@@ -249,13 +259,13 @@ async function videoToSubtitleFile(): Promise<string> {
 	console.log('Writing re-synced subtitle to file...');
 	const srtContentSynced = stringify(srtEntriesSynced);
 	const subtitlePathSynced = convertPathToExtension(subtitlePathOriginal, '_synced.srt');
-	await writeFile(subtitlePathSynced, srtContentSynced, { encoding: 'utf-8' });
+	writeFileSync(subtitlePathSynced, srtContentSynced, { encoding: 'utf-8' });
 	console.log('Writing re-synced subtitle to file...done');
 
 	return subtitlePathSynced;
 }
 
-videoToSubtitleFile()
+videoToSubtitleFile(/* videoFilePath, subtitleFilePath */)
 	.then(async (subtitlePathSynced: string) => {
 		console.log('Output: ' + subtitlePathSynced);
 		await waitForKeypress();

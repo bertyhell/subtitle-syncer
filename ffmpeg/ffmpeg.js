@@ -1,51 +1,51 @@
-var when		= require('when')
+let when		= require('when')
   , fs			= require('fs')
   , path			= require('path');
 
-var errors		= require('./errors')
+let errors		= require('./errors')
   , utils		= require('./utils')
   , configs		= require('./configs')
   , video		= require('./video');
 
-var ffmpeg = function (/* inputFilepath, settings, callback */) {
+let ffmpeg = function (/* inputFilepath, settings, callback */) {
 
 	/**
 	 * Retrieve the list of the codec supported by the ffmpeg software
 	 */
-	var _ffmpegInfoConfiguration = function (settings) {
+	let _ffmpegInfoConfiguration = function (settings) {
 		// New 'promise' instance
-		var deferred = when.defer();
+		let deferred = when.defer();
 		// Instance the new arrays for the format
-		var format = { modules : new Array(), encode : new Array(), decode : new Array() };
+		let format = { modules : [], encode : [], decode : [] };
 		// Make the call to retrieve information about the ffmpeg
 		utils.exec([ffmpeg.bin,'-formats','2>&1'], settings, function (error, stdout, stderr) {
 			// Get the list of modules
-			var configuration = /configuration:(.*)/.exec(stdout);
+			let configuration = /configuration:(.*)/.exec(stdout);
 			// Check if exists the configuration
 			if (configuration) {
 				// Get the list of modules
-				var modules = configuration[1].match(/--enable-([a-zA-Z0-9\-]+)/g);
+				let modules = configuration[1].match(/--enable-([a-zA-Z0-9\-]+)/g);
 				// Scan all modules
-				for (var indexModule in modules) {
+				for (let indexModule in modules) {
 					// Add module to the list
 					format.modules.push(/--enable-([a-zA-Z0-9\-]+)/.exec(modules[indexModule])[1]);
 				}
 			}
 			// Get the codec list
-			var codecList = stdout.match(/ (DE|D|E) (.*) {1,} (.*)/g);
+			let codecList = stdout.match(/ (DE|D|E) (.*) {1,} (.*)/g);
 			// Scan all codec
-			for (var i in codecList) {
+			for (let i in codecList) {
 				// Get the match value
-				var match = / (DE|D|E) (.*) {1,} (.*)/.exec(codecList[i]);
+				let match = / (DE|D|E) (.*) {1,} (.*)/.exec(codecList[i]);
 				// Check if match is valid
 				if (match) {
 					// Get the value from the match
-					var scope = match[1].replace(/\s/g,'')
+					let scope = match[1].replace(/\s/g,'')
 					  , extension = match[2].replace(/\s/g,'');
 					// Check which scope is best suited
-					if (scope == 'D' || scope == 'DE')
+					if (scope === 'D' || scope === 'DE')
 						format.decode.push(extension);
-					if (scope == 'E' || scope == 'DE')
+					if (scope === 'E' || scope === 'DE')
 						format.encode.push(extension);
 				}
 			}
@@ -59,13 +59,13 @@ var ffmpeg = function (/* inputFilepath, settings, callback */) {
 	/**
 	 * Get the video info
 	 */
-	var _videoInfo = function (fileInput, settings) {
+	let _videoInfo = function (fileInput, settings) {
 		// New 'promise' instance
-		var deferred = when.defer();
+		let deferred = when.defer();
 		// Make the call to retrieve information about the ffmpeg
 		utils.exec([ffmpeg.bin,'-i', utils.addQuotes(fileInput),'2>&1'], settings, function (error, stdout, stderr) {
 			// Perse output for retrieve the file info
-			var filename		= /from \'(.*)\'/.exec(stdout) || []
+			let filename		= /from '(.*)'/.exec(stdout) || []
 			  , title			= /(INAM|title)\s+:\s(.+)/.exec(stdout) || []
 			  , artist			= /artist\s+:\s(.+)/.exec(stdout) || []
 			  , album			= /album\s+:\s(.+)/.exec(stdout) || []
@@ -76,21 +76,21 @@ var ffmpeg = function (/* inputFilepath, settings, callback */) {
 
 			  , container		= /Input #0, ([a-zA-Z0-9]+),/.exec(stdout) || []
 			  , video_bitrate	= /bitrate: ([0-9]+) kb\/s/.exec(stdout) || []
-			  , video_stream	= /Stream #([0-9\.]+)([a-z0-9\(\)\[\]]*)[:] Video/.exec(stdout) || []
+			  , video_stream	= /Stream #([0-9.]+)([a-z0-9()\[\]]*)[:] Video/.exec(stdout) || []
 			  , video_codec		= /Video: ([\w]+)/.exec(stdout) || []
 			  , resolution		= /(([0-9]{2,5})x([0-9]{2,5}))/.exec(stdout) || []
-			  , pixel			= /[SP]AR ([0-9\:]+)/.exec(stdout) || []
-			  , aspect			= /DAR ([0-9\:]+)/.exec(stdout) || []
-			  , fps				= /([0-9\.]+) (fps|tb\(r\))/.exec(stdout) || []
+			  , pixel			= /[SP]AR ([0-9:]+)/.exec(stdout) || []
+			  , aspect			= /DAR ([0-9:]+)/.exec(stdout) || []
+			  , fps				= /([0-9.]+) (fps|tb\(r\))/.exec(stdout) || []
 
-			  , audio_stream	= /Stream #([0-9\.]+)([a-z0-9\(\)\[\]]*)[:] Audio/.exec(stdout) || []
+			  , audio_stream	= /Stream #([0-9.]+)([a-z0-9()\[\]]*)[:] Audio/.exec(stdout) || []
 			  , audio_codec		= /Audio: ([\w]+)/.exec(stdout) || []
 			  , sample_rate		= /([0-9]+) Hz/i.exec(stdout) || []
 			  , channels		= /Audio:.* (stereo|mono)/.exec(stdout) || []
 			  , audio_bitrate	= /Audio:.* ([0-9]+) kb\/s/.exec(stdout) || []
 			  , rotate			= /rotate[\s]+:[\s]([\d]{2,3})/.exec(stdout) || [];
 			// Build return object
-			var ret = {
+			let ret = {
 				filename		: filename[1] || ''
 			  , title			: title[2] || ''
 			  , artist			: artist[1] || ''
@@ -129,7 +129,7 @@ var ffmpeg = function (/* inputFilepath, settings, callback */) {
 			};
 			// Check if exist aspect ratio
 			if (aspect.length > 0) {
-				var aspectValue = aspect[1].split(":");
+				let aspectValue = aspect[1].split(":");
 				ret.video.aspect.x		= parseInt(aspectValue[0], 10);
 				ret.video.aspect.y		= parseInt(aspectValue[1], 10);
 				ret.video.aspect.string = aspect[1];
@@ -137,7 +137,7 @@ var ffmpeg = function (/* inputFilepath, settings, callback */) {
 			} else {
 				// If exists horizontal resolution then calculate aspect ratio
 				if(ret.video.resolution.w > 0) {
-					var gcdValue = utils.gcd(ret.video.resolution.w, ret.video.resolution.h);
+					let gcdValue = utils.gcd(ret.video.resolution.w, ret.video.resolution.h);
 					// Calculate aspect ratio
 					ret.video.aspect.x		= ret.video.resolution.w / gcdValue;
 					ret.video.aspect.y		= ret.video.resolution.h / gcdValue;
@@ -148,7 +148,7 @@ var ffmpeg = function (/* inputFilepath, settings, callback */) {
 			// Save pixel ratio for output size calculation
 			if (pixel.length > 0) {
 				ret.video.pixelString = pixel[1];
-				var pixelValue = pixel[1].split(":");
+				let pixelValue = pixel[1].split(":");
 				ret.video.pixel = parseFloat((parseInt(pixelValue[0], 10) / parseInt(pixelValue[1], 10)));
 			} else {
 				if (ret.video.resolution.w !== 0) {
@@ -179,8 +179,8 @@ var ffmpeg = function (/* inputFilepath, settings, callback */) {
 	/**
 	 * Get the info about ffmpeg's codec and about file
 	 */
-	var _getInformation = function (fileInput, settings) {
-		var deferreds = [];
+	let _getInformation = function (fileInput, settings) {
+		let deferreds = [];
 		// Add promise
 		deferreds.push(_ffmpegInfoConfiguration(settings));
 		deferreds.push(_videoInfo(fileInput, settings));
@@ -188,26 +188,26 @@ var ffmpeg = function (/* inputFilepath, settings, callback */) {
 		return when.all(deferreds);
 	}
 
-	var __constructor = function (args) {
+	let __constructor = function (args) {
 		// Check if exist at least one option
-		if (args.length == 0 || args[0] == undefined)
+		if (!args.length || !args[0])
 			throw errors.renderError('empty_input_filepath');
 		// Check if first argument is a string
 		if (typeof args[0] != 'string')
 			throw errors.renderError('input_filepath_must_be_string');
 		// Get the input filepath
-		var inputFilepath = args[0];
+		let inputFilepath = args[0];
 		// Check if file exist
 		if (!fs.existsSync(inputFilepath))
 			throw errors.renderError('fileinput_not_exist');
 
 		// New instance of the base configuration
-		var settings = new configs();
+		let settings = new configs();
 		// Callback to call
-		var callback = null;
+		let callback = null;
 
 		// Scan all arguments
-		for (var i = 1; i < args.length; i++) {
+		for (let i = 1; i < args.length; i++) {
 			// Check the type of variable
 			switch (typeof args[i]) {
 				case 'object' :
@@ -220,7 +220,7 @@ var ffmpeg = function (/* inputFilepath, settings, callback */) {
 		}
 
 		// Building the value for return value. Check if the callback is not a function. In this case will created a new instance of the deferred class
-		var deferred = typeof callback != 'function' ? when.defer() : { promise : null };
+		let deferred = typeof callback != 'function' ? when.defer() : { promise : null };
 
 		when(_getInformation(inputFilepath, settings), function (data) {
 			// Check if the callback is a function
