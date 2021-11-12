@@ -275,13 +275,17 @@ function reSyncSubtitle(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated
 
 	// Run over the remaining pins and apply linear interpolation between their 2 nearest synced subtitle neighbors
 	srtEntriesSynced.forEach((subtitleEntrySynced, indexSynced) => {
-		if (!subtitleEntrySynced.synced) {
-			const subtitleEntrySyncedLeftIndex = findIndexOfLeftNeighbor(srtEntriesSynced, indexSynced);
-			const subtitleEntrySyncedRightIndex = findIndexOfRightNeighbor(srtEntriesSynced, indexSynced);
-			interpolateSubtitleTiming(
-				srtEntriesOriginal[subtitleEntrySyncedLeftIndex], srtEntriesOriginal[indexSynced], srtEntriesOriginal[subtitleEntrySyncedRightIndex],
-				srtEntriesSynced[subtitleEntrySyncedLeftIndex], srtEntriesSynced[indexSynced], srtEntriesSynced[subtitleEntrySyncedRightIndex]
-			);
+		try {
+			if (!subtitleEntrySynced.synced) {
+				const subtitleEntrySyncedLeftIndex = findIndexOfLeftNeighbor(srtEntriesSynced, indexSynced);
+				const subtitleEntrySyncedRightIndex = findIndexOfRightNeighbor(srtEntriesSynced, indexSynced);
+				interpolateSubtitleTiming(
+					srtEntriesOriginal[subtitleEntrySyncedLeftIndex], srtEntriesOriginal[indexSynced], srtEntriesOriginal[subtitleEntrySyncedRightIndex],
+					srtEntriesSynced[subtitleEntrySyncedLeftIndex], srtEntriesSynced[indexSynced], srtEntriesSynced[subtitleEntrySyncedRightIndex]
+				);
+			}
+		} catch(err) {
+			console.error('Failed to sync subtitle. continuing...', subtitleEntrySynced);
 		}
 	});
 
