@@ -2,7 +2,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { default as vosk } from 'vosk';
 import ffmpeg from './ffmpeg/ffmpeg';
-import { cloneDeep, compact, last, uniq } from 'lodash';
+import { cloneDeep, compact, last, sortBy, take, uniq } from 'lodash';
 import { parse, stringify } from '@splayer/subtitle';
 import { distance } from 'fastest-levenshtein';
 import { range } from './utils/lerp';
@@ -13,11 +13,16 @@ import { readFileSync, writeFileSync } from 'fs';
 
 const TEXT_DISTANCE_PENALTY = 1;
 const OUT_OF_SYNC_PENALTY = 1;
+const PERCENTAGE_BEST_MATCHES = 30;
 
 interface SubtitleEntry {
 	start: number;
 	end: number;
 	text: string;
+}
+
+interface SubtitleEntrySynced extends SubtitleEntry {
+	synced?: boolean;
 }
 
 interface SttResult {
@@ -64,7 +69,7 @@ async function audioToSubtitle(audioPath: string, grammarList?: string[], maxWor
 		const rec = new vosk.Recognizer({ model: model, sampleRate: SAMPLE_RATE, grammar: grammarList });
 		rec.setWords(true);
 
-		const ffmpeg_run = spawn('ffmpeg', ['-loglevel', 'quiet', '-i', audioPath,
+		const ffmpeg_run = spawn(path.join(__dirname, 'ffmpeg/ffmpeg.exe'), ['-loglevel', 'quiet', '-i', audioPath,
 			'-ar', String(SAMPLE_RATE), '-ac', '1',
 			'-f', 's16le', '-bufsize', String(BUFFER_SIZE), '-']);
 
@@ -172,7 +177,7 @@ function getIndexMappingFunction(srtEntriesOriginal: SubtitleEntry[], srtEntries
  * @param srtEntriesGenerated
  * @param mapIndexFunc
  */
-function findEntryWithBestTextMatch(entry: SubtitleEntry, entryIndex: number, srtEntriesGenerated: SubtitleEntry[], mapIndexFunc: (index: number) => number) {
+function findEntryWithBestTextMatch(entry: SubtitleEntry, entryIndex: number, srtEntriesGenerated: SubtitleEntry[], mapIndexFunc: (index: number) => number): { originalIndex: number, generatedIndex: number, score: number } {
 	// Calculate scores
 	const scores = new Array(srtEntriesGenerated.length);
 	srtEntriesGenerated.forEach((entryGenerated, generatedEntryIndex: number) => {
@@ -185,7 +190,60 @@ function findEntryWithBestTextMatch(entry: SubtitleEntry, entryIndex: number, sr
 
 	// Pick the entry with the lowest score
 	const lowestIndex = indexOfMin(scores);
-	return srtEntriesGenerated[lowestIndex];
+	return { originalIndex: entryIndex, generatedIndex: lowestIndex, score: scores[lowestIndex] };
+}
+
+function mapSubtitleTiming(subtitleEntryOriginal: SubtitleEntry, subtitleEntryGenerated: SubtitleEntry, newSubtitleEntry: SubtitleEntry) {
+	// Map centers of start and end time generated to center of start and end time original
+	const centerOfGenerated = subtitleEntryGenerated.start + (subtitleEntryGenerated.end - subtitleEntryGenerated.start) / 2;
+	const lengthOfOriginal = subtitleEntryOriginal.end - subtitleEntryOriginal.start;
+	newSubtitleEntry.start = centerOfGenerated - lengthOfOriginal / 2;
+	newSubtitleEntry.end = centerOfGenerated + lengthOfOriginal / 2;
+}
+
+function findIndexOfLeftNeighbor(entries: SubtitleEntrySynced[], startIndex: number): number {
+	let index = startIndex;
+	do {
+		index--;
+	} while (!entries[index].synced);
+	return index;
+}
+
+function findIndexOfRightNeighbor(entries: SubtitleEntrySynced[], startIndex: number): number {
+	let index = startIndex;
+	do {
+		index++;
+	} while (!entries[index].synced);
+	return index;
+}
+
+function getCenterOfSubtitle(sub: SubtitleEntry) {
+	return sub.start + (sub.end - sub.start) / 2;
+}
+
+/**
+ * Syncs the subtitle timing using interpolation
+ * eg:
+ * originalLeft.................originalCurrent.....originalRight
+ * syncedLeft.................syncedCurrent.....syncedRight
+ */
+function interpolateSubtitleTiming(
+	subtitleEntryOriginalLeft: SubtitleEntry, subtitleEntryOriginalCurrent: SubtitleEntry, subtitleEntryOriginalRight: SubtitleEntry,
+	subtitleEntrySyncedLeft: SubtitleEntrySynced, subtitleEntrySyncedCurrent: SubtitleEntrySynced, subtitleEntrySyncedRight: SubtitleEntrySynced
+) {
+	const originalLeftTiming = subtitleEntryOriginalLeft.end;
+	const originalCurrentTiming = getCenterOfSubtitle(subtitleEntryOriginalCurrent);
+	const originalRightTiming = subtitleEntryOriginalLeft.start;
+	const syncedLeftTiming = subtitleEntrySyncedLeft.end;
+	const syncedRightTiming = subtitleEntrySyncedRight.start;
+
+	// Linear interpolation
+	const syncedCenterTiming = range(originalLeftTiming, originalRightTiming, syncedLeftTiming, syncedRightTiming, originalCurrentTiming);
+
+	// Keep the subtitle duration of the original subtitle
+	const lengthOfOriginal = subtitleEntryOriginalCurrent.end - subtitleEntryOriginalCurrent.start;
+	subtitleEntrySyncedCurrent.start = syncedCenterTiming - lengthOfOriginal / 2;
+	subtitleEntrySyncedCurrent.end = syncedCenterTiming + lengthOfOriginal / 2;
 }
 
 function reSyncSubtitle(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated: SubtitleEntry[]): SubtitleEntry[] {
@@ -193,15 +251,39 @@ function reSyncSubtitle(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated
 	// This function will translate the index of the original file (eg: 5th entry) to the expected index in the generated file (eg: 5.67) if the generated file has a few more entries
 	const mapIndexFunc = getIndexMappingFunction(srtEntriesOriginal, srtEntriesGenerated);
 
-	const srtEntriesSynced = cloneDeep(srtEntriesOriginal);
-	srtEntriesOriginal.forEach((entryOriginal, index) => {
-		const srtEntryGeneratedWithClosesTextMatch = findEntryWithBestTextMatch(entryOriginal, index, srtEntriesGenerated, mapIndexFunc);
+	// Calculate which subtitle entry in the generated subtitle best matches each subtitle entry in the original subtitle
+	const bestScores = srtEntriesOriginal.map((entryOriginal, index) => {
+		return findEntryWithBestTextMatch(entryOriginal, index, srtEntriesGenerated, mapIndexFunc);
+	});
 
-		// Map centers of start and end time generated to center of start and end time original
-		const centerOfGenerated = srtEntryGeneratedWithClosesTextMatch.start + (srtEntryGeneratedWithClosesTextMatch.end - srtEntryGeneratedWithClosesTextMatch.start) / 2;
-		const lengthOfOriginal = entryOriginal.end - entryOriginal.start;
-		srtEntriesSynced[index].start = centerOfGenerated - lengthOfOriginal / 2;
-		srtEntriesSynced[index].end = centerOfGenerated + lengthOfOriginal / 2;
+	// Take the PERCENTAGE_BEST_MATCHES % best matches and sync those subtitle entries
+	const srtEntriesSynced: SubtitleEntrySynced[] = cloneDeep(srtEntriesOriginal);
+	const bestScoresSorted = sortBy(bestScores, (bestScore) => bestScore.score);
+	const bestScoresPins = take(bestScoresSorted, Math.round(bestScores.length * PERCENTAGE_BEST_MATCHES / 100));
+	bestScoresPins.forEach(bestScorePin => {
+		mapSubtitleTiming(
+			srtEntriesOriginal[bestScorePin.originalIndex],
+			srtEntriesGenerated[bestScorePin.generatedIndex],
+			srtEntriesSynced[bestScorePin.originalIndex]
+		);
+		srtEntriesSynced[bestScorePin.originalIndex].synced = true;
+	});
+
+	// Run over the remaining pins and apply linear interpolation between their 2 nearest synced subtitle neighbors
+	srtEntriesSynced.forEach((subtitleEntrySynced, indexSynced) => {
+		if (!subtitleEntrySynced.synced) {
+			const subtitleEntrySyncedLeftIndex = findIndexOfLeftNeighbor(srtEntriesSynced, indexSynced);
+			const subtitleEntrySyncedRightIndex = findIndexOfRightNeighbor(srtEntriesSynced, indexSynced);
+			interpolateSubtitleTiming(
+				srtEntriesOriginal[subtitleEntrySyncedLeftIndex], srtEntriesOriginal[indexSynced], srtEntriesOriginal[subtitleEntrySyncedRightIndex],
+				srtEntriesSynced[subtitleEntrySyncedLeftIndex], srtEntriesSynced[indexSynced], srtEntriesSynced[subtitleEntrySyncedRightIndex]
+			);
+		}
+	});
+
+	srtEntriesSynced.forEach((subtitleEntrySynced) => {
+		// Wait with setting subtitle entries as synced, until all items have been interpolated
+		subtitleEntrySynced.synced = true;
 	});
 
 	return srtEntriesSynced;
