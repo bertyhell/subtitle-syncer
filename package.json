@@ -5,7 +5,7 @@
   "main": "subtitle-syncer.ts",
   "scripts": {
     "start": "cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./ffmpeg && ts-node subtitle-syncer.ts",
-    "start:example1": "cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./ffmpeg && ts-node subtitle-syncer.ts ./example/movie.mp4 ./example/movie_original.srt",
+    "start:example1": "cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./ffmpeg && ts-node subtitle-syncer.ts ./example/movie.mp4 ./example/subtitle_with_bad_timing.srt",
     "start:example2": "cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./ffmpeg && ts-node subtitle-syncer.ts ./example2/Alone-S02E05-Storm-Rising.mkv ./example2/Alone-S02E05-Storm-Rising.srt",
     "build": "npm run build-sources && npm run build-caxa",
     "build-sources": "rm -rf build && tsc && cp ./node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe ./build/ffmpeg && cp -r ./vosk-speech-model ./build && cp package.json package-lock.json build && npm ci",

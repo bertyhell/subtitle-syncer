@@ -93,44 +93,48 @@ async function audioToSubtitle(audioPath: string, grammarList?: string[], maxWor
 		});
 
 		ffmpeg_run.on('exit', () => {
-			rec.free();
-			model.free();
-			results.forEach(element => {
-				if (!element.hasOwnProperty('result')) {
-					return;
-				}
-				const words = element.result;
-				if (words.length == 1) {
-					subs.push({
-						start: words[0].start * 1000,
-						end: words[0].end * 1000,
-						text: words[0].word
-					});
-					return;
-				}
-				let start_index = 0;
-				let text = words[0].word + ' ';
-				for (let i = 1; i < words.length; i++) {
-					text += words[i].word + ' ';
-					if (i % maxWordsPerLine == 0) {
+			try {
+				rec.free();
+				model.free();
+				results.forEach(element => {
+					if (!element.hasOwnProperty('result')) {
+						return;
+					}
+					const words = element.result;
+					if (words.length == 1) {
+						subs.push({
+							start: words[0].start * 1000,
+							end: words[0].end * 1000,
+							text: words[0].word
+						});
+						return;
+					}
+					let start_index = 0;
+					let text = words[0].word + ' ';
+					for (let i = 1; i < words.length; i++) {
+						text += words[i].word + ' ';
+						if (i % maxWordsPerLine == 0) {
+							subs.push({
+								start: words[start_index].start * 1000,
+								end: words[i].end * 1000,
+								text: text.slice(0, text.length - 1)
+							});
+							start_index = i;
+							text = '';
+						}
+					}
+					if (start_index != words.length - 1) {
 						subs.push({
 							start: words[start_index].start * 1000,
-							end: words[i].end * 1000,
-							text: text.slice(0, text.length - 1)
+							end: words[words.length - 1].end * 1000,
+							text: text
 						});
-						start_index = i;
-						text = '';
 					}
-				}
-				if (start_index != words.length - 1) {
-					subs.push({
-						start: words[start_index].start * 1000,
-						end: words[words.length - 1].end * 1000,
-						text: text
-					});
-				}
-			});
-			resolve(subs);
+				});
+				resolve(subs);
+			} catch (err) {
+				reject(err);
+			}
 		});
 	});
 }
@@ -320,7 +324,6 @@ async function videoToSubtitleFile(): Promise<string> {
 	console.log('Generating subtitle file from audio...');
 	const grammarListOriginalResult = srtToGrammarList(srtEntriesOriginal);
 	const srtEntriesGenerated = await audioToSubtitle(audioPath, grammarListOriginalResult.grammarList, grammarListOriginalResult.maxWordCount, duration);
-	await rmSilent(audioPath);
 	console.log('Generating subtitle file from audio...done');
 
 	// Write srt file with bad grammar and good timing (generated)

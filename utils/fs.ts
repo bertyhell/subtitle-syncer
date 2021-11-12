@@ -40,6 +40,8 @@ export function rmSilent(filePath: string): Promise<boolean> {
 				// File doesn't exist
 				resolve(false);
 			}
-		}).catch(reject)
+		}).catch((err) => {
+			reject(err);
+		})
 	});
 }

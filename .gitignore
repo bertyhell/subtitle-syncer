@@ -8,3 +8,4 @@ ffmpeg/ffmpeg.exe
 example2/
 *.exe
 *.app
+*.wav
