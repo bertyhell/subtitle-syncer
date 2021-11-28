@@ -10,12 +10,13 @@ import { indexOfMin } from './utils/index-of-min';
 import { waitForKeypress } from './utils/wait-for-key-press';
 import { pathExists, rmSilent } from './utils/fs';
 import { readFileSync, writeFileSync } from 'fs';
+import { drawSeries } from './writeToImage';
 
 const TEXT_DISTANCE_PENALTY = 1;
 const OUT_OF_SYNC_PENALTY = 1;
 const PERCENTAGE_BEST_MATCHES = 30;
 
-interface SubtitleEntry {
+export interface SubtitleEntry {
 	start: number;
 	end: number;
 	text: string;
@@ -297,23 +298,6 @@ function reSyncSubtitle(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated
 	return srtEntriesSynced;
 }
 
-function writeSubtitleForExcel(path: string, files: { label: string, entries: SubtitleEntry[] }[]) {
-	let csv = '';
-	// headers
-	for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
-		csv += `index_${files[fileIndex].label};start_${files[fileIndex].label};end_${files[fileIndex].label};`;
-	}
-	// entries
-	for (let entryIndex = 0; entryIndex < (maxBy(files, file => file.entries.length)?.entries?.length || 0); entryIndex++) {
-		for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
-			const entry: SubtitleEntry | undefined = files[fileIndex].entries[entryIndex];
-			csv += entryIndex + ';' + entry?.start + ';' + entry.end + ';';
-		}
-		csv += '\n';
-	}
-	writeFileSync(path, csv);
-}
-
 async function videoToSubtitleFile(): Promise<string> {
 	// parse args
 	const args = compact([process.argv.pop(), process.argv.pop()]);
@@ -330,45 +314,60 @@ async function videoToSubtitleFile(): Promise<string> {
 	subtitlePathOriginal = path.resolve(subtitlePathOriginal);
 	videoPath = path.resolve(videoPath);
 
-	// Extract WAV audio from video file
-	console.log('Extracting audio from video...');
-	const { wavPath: audioPath, duration } = await videoToAudio(videoPath);
-	console.log('Extracting audio from video...done');
+	// // Extract WAV audio from video file
+	// console.log('Extracting audio from video...');
+	// const { wavPath: audioPath, duration } = await videoToAudio(videoPath);
+	// console.log('Extracting audio from video...done');
+	//
+	// // Parse original srt with bad timings but good grammar (original)
+	// console.log('Parsing subtitle file...');
+	// const srtContentOriginal = (await readFileSync(subtitlePathOriginal)).toString('utf-8');
+	// const srtEntriesOriginal = await parse(srtContentOriginal);
+	// console.log('Parsing subtitle file...done');
+	//
+	// // Generate new srt with good timing but bad grammar
+	// console.log('Generating subtitle file from audio...');
+	// const grammarListOriginalResult = srtToGrammarList(srtEntriesOriginal);
+	// const srtEntriesGenerated = await audioToSubtitle(audioPath, grammarListOriginalResult.grammarList, grammarListOriginalResult.maxWordCount, duration);
+	// console.log('Generating subtitle file from audio...done');
+	//
+	// // Write srt file with bad grammar and good timing (generated)
+	// console.log('Writing generated subtitle from audio to file...');
+	// const srtContentGenerated = stringify(srtEntriesGenerated);
+	// const subtitlePathGenerated = convertPathToExtension(subtitlePathOriginal, '_generated.srt');
+	// writeFileSync(subtitlePathGenerated, srtContentGenerated, { encoding: 'utf-8' });
+	// console.log('Writing generated subtitle from audio to file...done');
+	//
+	// // Map the good grammar from the original onto the good timing from the generated srt
+	// console.log('Sync original subtitle file using generated subtitle file times...');
+	// const srtEntriesSynced = reSyncSubtitle(srtEntriesOriginal, srtEntriesGenerated);
+	// console.log('Sync original subtitle file using generated subtitle file times...done');
+	//
+	// // Write srt file with good grammar and good timing (synced)
+	// console.log('Writing re-synced subtitle to file...');
+	// const srtContentSynced = stringify(srtEntriesSynced);
+	// const subtitlePathSynced = convertPathToExtension(subtitlePathOriginal, '_synced.srt');
+	// writeFileSync(subtitlePathSynced, srtContentSynced, { encoding: 'utf-8' });
 
-	// Parse original srt with bad timings but good grammar (original)
-	console.log('Parsing subtitle file...');
-	const srtContentOriginal = (await readFileSync(subtitlePathOriginal)).toString('utf-8');
-	const srtEntriesOriginal = await parse(srtContentOriginal);
-	console.log('Parsing subtitle file...done');
-
-	// Generate new srt with good timing but bad grammar
-	console.log('Generating subtitle file from audio...');
-	const grammarListOriginalResult = srtToGrammarList(srtEntriesOriginal);
-	const srtEntriesGenerated = await audioToSubtitle(audioPath, grammarListOriginalResult.grammarList, grammarListOriginalResult.maxWordCount, duration);
-	console.log('Generating subtitle file from audio...done');
-
-	// Write srt file with bad grammar and good timing (generated)
-	console.log('Writing generated subtitle from audio to file...');
-	const srtContentGenerated = stringify(srtEntriesGenerated);
 	const subtitlePathGenerated = convertPathToExtension(subtitlePathOriginal, '_generated.srt');
-	writeFileSync(subtitlePathGenerated, srtContentGenerated, { encoding: 'utf-8' });
-	console.log('Writing generated subtitle from audio to file...done');
-
-	// Map the good grammar from the original onto the good timing from the generated srt
-	console.log('Sync original subtitle file using generated subtitle file times...');
-	const srtEntriesSynced = reSyncSubtitle(srtEntriesOriginal, srtEntriesGenerated);
-	console.log('Sync original subtitle file using generated subtitle file times...done');
-
-	// Write srt file with good grammar and good timing (synced)
-	console.log('Writing re-synced subtitle to file...');
-	const srtContentSynced = stringify(srtEntriesSynced);
 	const subtitlePathSynced = convertPathToExtension(subtitlePathOriginal, '_synced.srt');
-	const subtitlePathCsv = convertPathToExtension(subtitlePathOriginal, '_compare.csv');
-	writeSubtitleForExcel(subtitlePathCsv, [
-		{ label: 'original', entries: srtEntriesOriginal },
-		{ label: 'generated', entries: srtEntriesGenerated },
-		{ label: 'synced', entries: srtEntriesSynced }]);
-	writeFileSync(subtitlePathSynced, srtContentSynced, { encoding: 'utf-8' });
+
+	const srtContentOriginal = (await readFileSync(subtitlePathOriginal)).toString('utf-8');
+	const srtContentGenerated = (await readFileSync(subtitlePathGenerated)).toString('utf-8');
+	const srtContentSynced = (await readFileSync(subtitlePathSynced)).toString('utf-8');
+
+	const srtEntriesOriginal: SubtitleEntry[] = parse(srtContentOriginal);
+	const srtEntriesGenerated: SubtitleEntry[] = parse(srtContentGenerated);
+	const srtEntriesSynced: SubtitleEntry[] = parse(srtContentSynced);
+
+	const subtitlePathPng = convertPathToExtension(subtitlePathOriginal, '_compare.png');
+	await drawSeries(subtitlePathPng, [srtEntriesOriginal, srtEntriesGenerated, srtEntriesSynced].map(serie => {
+		return serie.map(entry => {
+			return {start: entry.start, end: entry.end};
+		});
+	}));
+
+
 	console.log('Writing re-synced subtitle to file...done');
 
 	return subtitlePathSynced;

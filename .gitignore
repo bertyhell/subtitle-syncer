@@ -5,7 +5,8 @@ build/
 dist/
 ffmpeg/ffmpeg.exe
 *.bat
-example2/
 *.exe
 *.app
 *.wav
+*.mkv
+*.mp4
