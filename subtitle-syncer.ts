@@ -2,7 +2,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { default as vosk } from 'vosk';
 import ffmpeg from './ffmpeg/ffmpeg';
-import { cloneDeep, compact, last, sortBy, take, uniq } from 'lodash';
+import { cloneDeep, compact, last, maxBy, sortBy, take, uniq } from 'lodash';
 import { parse, stringify } from '@splayer/subtitle';
 import { distance } from 'fastest-levenshtein';
 import { range } from './utils/lerp';
@@ -284,7 +284,7 @@ function reSyncSubtitle(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated
 					srtEntriesSynced[subtitleEntrySyncedLeftIndex], srtEntriesSynced[indexSynced], srtEntriesSynced[subtitleEntrySyncedRightIndex]
 				);
 			}
-		} catch(err) {
+		} catch (err) {
 			console.error('Failed to sync subtitle. continuing...', subtitleEntrySynced);
 		}
 	});
@@ -295,6 +295,23 @@ function reSyncSubtitle(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated
 	});
 
 	return srtEntriesSynced;
+}
+
+function writeSubtitleForExcel(path: string, files: { label: string, entries: SubtitleEntry[] }[]) {
+	let csv = '';
+	// headers
+	for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+		csv += `index_${files[fileIndex].label};start_${files[fileIndex].label};end_${files[fileIndex].label};`;
+	}
+	// entries
+	for (let entryIndex = 0; entryIndex < (maxBy(files, file => file.entries.length)?.entries?.length || 0); entryIndex++) {
+		for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+			const entry: SubtitleEntry | undefined = files[fileIndex].entries[entryIndex];
+			csv += entryIndex + ';' + entry?.start + ';' + entry.end + ';';
+		}
+		csv += '\n';
+	}
+	writeFileSync(path, csv);
 }
 
 async function videoToSubtitleFile(): Promise<string> {
@@ -346,6 +363,11 @@ async function videoToSubtitleFile(): Promise<string> {
 	console.log('Writing re-synced subtitle to file...');
 	const srtContentSynced = stringify(srtEntriesSynced);
 	const subtitlePathSynced = convertPathToExtension(subtitlePathOriginal, '_synced.srt');
+	const subtitlePathCsv = convertPathToExtension(subtitlePathOriginal, '_compare.csv');
+	writeSubtitleForExcel(subtitlePathCsv, [
+		{ label: 'original', entries: srtEntriesOriginal },
+		{ label: 'generated', entries: srtEntriesGenerated },
+		{ label: 'synced', entries: srtEntriesSynced }]);
 	writeFileSync(subtitlePathSynced, srtContentSynced, { encoding: 'utf-8' });
 	console.log('Writing re-synced subtitle to file...done');
 
