@@ -11,20 +11,11 @@ import { waitForKeypress } from './utils/wait-for-key-press';
 import { pathExists, rmSilent } from './utils/fs';
 import { readFileSync, writeFileSync } from 'fs';
 import { drawSeries } from './writeToImage';
+import { SubtitleEntry, SubtitleEntrySynced } from './types';
 
 const TEXT_DISTANCE_PENALTY = 1;
 const OUT_OF_SYNC_PENALTY = 1;
 const PERCENTAGE_BEST_MATCHES = 30;
-
-export interface SubtitleEntry {
-	start: number;
-	end: number;
-	text: string;
-}
-
-interface SubtitleEntrySynced extends SubtitleEntry {
-	synced?: boolean;
-}
 
 interface SttResult {
 	result: {
@@ -271,6 +262,7 @@ function reSyncSubtitle(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated
 			srtEntriesGenerated[bestScorePin.generatedIndex],
 			srtEntriesSynced[bestScorePin.originalIndex]
 		);
+		srtEntriesSynced[bestScorePin.originalIndex].originalIndex = bestScorePin.originalIndex;
 		srtEntriesSynced[bestScorePin.originalIndex].synced = true;
 	});
 
@@ -358,14 +350,12 @@ async function videoToSubtitleFile(): Promise<string> {
 
 	const srtEntriesOriginal: SubtitleEntry[] = parse(srtContentOriginal);
 	const srtEntriesGenerated: SubtitleEntry[] = parse(srtContentGenerated);
-	const srtEntriesSynced: SubtitleEntry[] = parse(srtContentSynced);
+	// const srtEntriesSynced: SubtitleEntry[] = parse(srtContentSynced);
+
+	const srtEntriesSynced = reSyncSubtitle(srtEntriesOriginal, srtEntriesGenerated);
 
 	const subtitlePathPng = convertPathToExtension(subtitlePathOriginal, '_compare.png');
-	await drawSeries(subtitlePathPng, [srtEntriesOriginal, srtEntriesGenerated, srtEntriesSynced].map(serie => {
-		return serie.map(entry => {
-			return {start: entry.start, end: entry.end};
-		});
-	}));
+	await drawSeries(subtitlePathPng, [srtEntriesOriginal, srtEntriesGenerated, srtEntriesSynced]);
 
 
 	console.log('Writing re-synced subtitle to file...done');
