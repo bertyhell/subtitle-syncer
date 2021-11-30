@@ -6,5 +6,5 @@ export interface SubtitleEntry {
 
 export interface SubtitleEntrySynced extends SubtitleEntry {
 	synced?: boolean;
-	originalIndex?: number;
+	generatedIndex?: number;
 }

@@ -22,9 +22,11 @@
   "license": "MIT",
   "dependencies": {
     "@splayer/subtitle": "^2.0.3",
+    "ascii-histogram": "^1.2.1",
     "canvas": "^2.8.0",
-    "fastest-levenshtein": "^1.0.12",
+    "compute-histogram": "^0.9.11",
     "lodash": "^4.17.21",
+    "string-similarity": "^4.0.4",
     "vosk": "^0.3.32",
     "when": "^3.7.8"
   },

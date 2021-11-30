@@ -4,7 +4,6 @@ import { default as vosk } from 'vosk';
 import ffmpeg from './ffmpeg/ffmpeg';
 import { cloneDeep, compact, last, maxBy, sortBy, take, uniq } from 'lodash';
 import { parse, stringify } from '@splayer/subtitle';
-import { distance } from 'fastest-levenshtein';
 import { range } from './utils/lerp';
 import { indexOfMin } from './utils/index-of-min';
 import { waitForKeypress } from './utils/wait-for-key-press';
@@ -13,9 +12,11 @@ import { readFileSync, writeFileSync } from 'fs';
 import { drawSeries } from './writeToImage';
 import { SubtitleEntry, SubtitleEntrySynced } from './types';
 
-const TEXT_DISTANCE_PENALTY = 1;
+const stringSimilarity = require('string-similarity');
+
+const TEXT_LENGTH_BONUS = 3;
 const OUT_OF_SYNC_PENALTY = 1;
-const PERCENTAGE_BEST_MATCHES = 30;
+const PERCENTAGE_BEST_MATCHES = 50;
 
 interface SttResult {
 	result: {
@@ -177,11 +178,8 @@ function findEntryWithBestTextMatch(entry: SubtitleEntry, entryIndex: number, sr
 	// Calculate scores
 	const scores = new Array(srtEntriesGenerated.length);
 	srtEntriesGenerated.forEach((entryGenerated, generatedEntryIndex: number) => {
-		const dist = distance(entryGenerated.text, entry.text);
-		const estimatedIndex = mapIndexFunc(entryIndex);
-		scores[generatedEntryIndex] =
-			(dist / entry.text.length * TEXT_DISTANCE_PENALTY) +
-			(Math.abs(estimatedIndex - generatedEntryIndex) * OUT_OF_SYNC_PENALTY);
+		const dist = 1 - stringSimilarity.compareTwoStrings(entryGenerated.text, entry.text);
+		scores[generatedEntryIndex] =	dist;
 	});
 
 	// Pick the entry with the lowest score
@@ -262,25 +260,25 @@ function reSyncSubtitle(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated
 			srtEntriesGenerated[bestScorePin.generatedIndex],
 			srtEntriesSynced[bestScorePin.originalIndex]
 		);
-		srtEntriesSynced[bestScorePin.originalIndex].originalIndex = bestScorePin.originalIndex;
+		srtEntriesSynced[bestScorePin.originalIndex].generatedIndex = bestScorePin.generatedIndex;
 		srtEntriesSynced[bestScorePin.originalIndex].synced = true;
 	});
 
-	// Run over the remaining pins and apply linear interpolation between their 2 nearest synced subtitle neighbors
-	srtEntriesSynced.forEach((subtitleEntrySynced, indexSynced) => {
-		try {
-			if (!subtitleEntrySynced.synced) {
-				const subtitleEntrySyncedLeftIndex = findIndexOfLeftNeighbor(srtEntriesSynced, indexSynced);
-				const subtitleEntrySyncedRightIndex = findIndexOfRightNeighbor(srtEntriesSynced, indexSynced);
-				interpolateSubtitleTiming(
-					srtEntriesOriginal[subtitleEntrySyncedLeftIndex], srtEntriesOriginal[indexSynced], srtEntriesOriginal[subtitleEntrySyncedRightIndex],
-					srtEntriesSynced[subtitleEntrySyncedLeftIndex], srtEntriesSynced[indexSynced], srtEntriesSynced[subtitleEntrySyncedRightIndex]
-				);
-			}
-		} catch (err) {
-			console.error('Failed to sync subtitle. continuing...', subtitleEntrySynced);
-		}
-	});
+	// // Run over the remaining pins and apply linear interpolation between their 2 nearest synced subtitle neighbors
+	// srtEntriesSynced.forEach((subtitleEntrySynced, indexSynced) => {
+	// 	try {
+	// 		if (!subtitleEntrySynced.synced) {
+	// 			const subtitleEntrySyncedLeftIndex = findIndexOfLeftNeighbor(srtEntriesSynced, indexSynced);
+	// 			const subtitleEntrySyncedRightIndex = findIndexOfRightNeighbor(srtEntriesSynced, indexSynced);
+	// 			interpolateSubtitleTiming(
+	// 				srtEntriesOriginal[subtitleEntrySyncedLeftIndex], srtEntriesOriginal[indexSynced], srtEntriesOriginal[subtitleEntrySyncedRightIndex],
+	// 				srtEntriesSynced[subtitleEntrySyncedLeftIndex], srtEntriesSynced[indexSynced], srtEntriesSynced[subtitleEntrySyncedRightIndex]
+	// 			);
+	// 		}
+	// 	} catch (err) {
+	// 		console.error('Failed to sync subtitle. continuing...', subtitleEntrySynced);
+	// 	}
+	// });
 
 	srtEntriesSynced.forEach((subtitleEntrySynced) => {
 		// Wait with setting subtitle entries as synced, until all items have been interpolated
