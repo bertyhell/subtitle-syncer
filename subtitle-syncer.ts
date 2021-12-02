@@ -2,21 +2,64 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { default as vosk } from 'vosk';
 import ffmpeg from './ffmpeg/ffmpeg';
-import { cloneDeep, compact, last, maxBy, sortBy, take, uniq } from 'lodash';
+import { cloneDeep, compact, inRange, isNil, last, maxBy, reverse, sortBy, take, takeRight, uniq } from 'lodash';
 import { parse, stringify } from '@splayer/subtitle';
 import { range } from './utils/lerp';
-import { indexOfMin } from './utils/index-of-min';
+import { indexOfMax } from './utils/index-of-max';
 import { waitForKeypress } from './utils/wait-for-key-press';
 import { pathExists, rmSilent } from './utils/fs';
 import { readFileSync, writeFileSync } from 'fs';
 import { drawSeries } from './writeToImage';
 import { SubtitleEntry, SubtitleEntrySynced } from './types';
+import { calculateHistogram, HistogramEntry } from './utils/histogram';
 
 const stringSimilarity = require('string-similarity');
 
-const TEXT_LENGTH_BONUS = 3;
-const OUT_OF_SYNC_PENALTY = 1;
-const PERCENTAGE_BEST_MATCHES = 50;
+/**
+ * Float between 0 and 1
+ */
+type normalizedScore = number;
+
+/**
+ * During the syncing process the differences between the original subtitle entry index and the best matching generated subtitle entry are calculated
+ * From all these numbers a histogram is created with 100 buckets
+ * Then only predictions are used if they fall inside the bulk of the histogram curve
+ * What constitutes the bulk is determines by this constant
+ *
+ * Eg: in this example
+ * - an item between -14.88 and -3.66 would receive a histogram score of 87/117
+ * - an item between -3.66 and 7.56 would receive a histogram score of 87/117
+ * - an item between 7.56 and 18.78 would receive a histogram score of 62/117
+ * - an item between 86.1 and 97.32 would receive a histogram score of 0/117
+ *
+ * -93.41    -82.19 | =                                        | 2
+ * -82.19    -70.97 |                                          | 1
+ * -70.97    -59.75 |                                          | 1
+ * -59.75    -48.53 |                                          | 1
+ * -48.53    -37.31 | =                                        | 2
+ * -37.31    -26.00 | =                                        | 2
+ * -26.09    -14.87 | =                                        | 4
+ * -14.87     -3.65 | ==============================           | 87
+ *  -3.65      7.56 | ======================================== | 117
+ *   7.56     18.78 | =====================                    | 62
+ *  18.78     30.00 | ===========                              | 31
+ *  30.00     41.22 |                                          | 1
+ *  41.22     52.44 |                                          | 1
+ *  52.44     63.66 |                                          | 1
+ *  63.66     74.88 |                                          | 1
+ *  74.88     86.10 |                                          | 1
+ *  86.10     97.32 |                                          | 0
+ *  97.32    108.54 |                                          | 1
+ * 108.54    119.76 |                                          | 1
+ */
+const NUMBER_OF_HISTOGRAM_BINS = 200;
+
+const STRING_SIMILARITY_SCORE_MULTIPLIER = 0.5;
+const ORIGINAL_LENGTH_SCORE_MULTIPLIER = 0.5;
+const GENERATED_LENGTH_SCORE_MULTIPLIER = 0.5;
+const INDEX_DIFFERENCE_HISTOGRAM_SCORE_MULTIPLIER = 5;
+
+const PERCENTAGE_BEST_MATCHES = 30;
 
 interface SttResult {
 	result: {
@@ -178,13 +221,12 @@ function findEntryWithBestTextMatch(entry: SubtitleEntry, entryIndex: number, sr
 	// Calculate scores
 	const scores = new Array(srtEntriesGenerated.length);
 	srtEntriesGenerated.forEach((entryGenerated, generatedEntryIndex: number) => {
-		const dist = 1 - stringSimilarity.compareTwoStrings(entryGenerated.text, entry.text);
-		scores[generatedEntryIndex] =	dist;
+		scores[generatedEntryIndex] =	stringSimilarity.compareTwoStrings(entryGenerated.text, entry.text);
 	});
 
 	// Pick the entry with the lowest score
-	const lowestIndex = indexOfMin(scores);
-	return { originalIndex: entryIndex, generatedIndex: lowestIndex, score: scores[lowestIndex] };
+	const highestIndex = indexOfMax(scores);
+	return { originalIndex: entryIndex, generatedIndex: highestIndex, score: scores[highestIndex] };
 }
 
 function mapSubtitleTiming(subtitleEntryOriginal: SubtitleEntry, subtitleEntryGenerated: SubtitleEntry, newSubtitleEntry: SubtitleEntry) {
@@ -195,19 +237,27 @@ function mapSubtitleTiming(subtitleEntryOriginal: SubtitleEntry, subtitleEntryGe
 	newSubtitleEntry.end = centerOfGenerated + lengthOfOriginal / 2;
 }
 
-function findIndexOfLeftNeighbor(entries: SubtitleEntrySynced[], startIndex: number): number {
+function findIndexOfLeftNeighbor(entries: SubtitleEntrySynced[], startIndex: number): number | null {
 	let index = startIndex;
 	do {
 		index--;
-	} while (!entries[index].synced);
+	} while (!entries[index].synced && index >= 0);
+
+	if (index < 0) {
+		return null; // entry doesn't have a left neighbor that is already synced. We'll have to figure out the timing using extrapolation.
+	}
 	return index;
 }
 
-function findIndexOfRightNeighbor(entries: SubtitleEntrySynced[], startIndex: number): number {
+function findIndexOfRightNeighbor(entries: SubtitleEntrySynced[], startIndex: number): number | null {
 	let index = startIndex;
 	do {
 		index++;
-	} while (!entries[index].synced);
+	} while (!entries[index].synced && index < entries.length);
+
+	if (index === entries.length) {
+		return null; // entry doesn't have a right neighbor that is already synced. We'll have to figure out the timing using extrapolation.
+	}
 	return index;
 }
 
@@ -240,6 +290,19 @@ function interpolateSubtitleTiming(
 	subtitleEntrySyncedCurrent.end = syncedCenterTiming + lengthOfOriginal / 2;
 }
 
+/**
+ *
+ * @param value
+ * @param histogram
+ */
+function getHistogramScore(value: number, histogram: HistogramEntry[]): number {
+	let index = 0;
+	while (!inRange(value, histogram[index].min, histogram[index].max)) {
+		index++;
+	}
+	return histogram[index].count;
+}
+
 function reSyncSubtitle(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated: SubtitleEntry[]): SubtitleEntry[] {
 	// The generated subtitle file can contain more or less entries than the original
 	// This function will translate the index of the original file (eg: 5th entry) to the expected index in the generated file (eg: 5.67) if the generated file has a few more entries
@@ -250,10 +313,38 @@ function reSyncSubtitle(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated
 		return findEntryWithBestTextMatch(entryOriginal, index, srtEntriesGenerated, mapIndexFunc);
 	});
 
-	// Take the PERCENTAGE_BEST_MATCHES % best matches and sync those subtitle entries
 	const srtEntriesSynced: SubtitleEntrySynced[] = cloneDeep(srtEntriesOriginal);
-	const bestScoresSorted = sortBy(bestScores, (bestScore) => bestScore.score);
-	const bestScoresPins = take(bestScoresSorted, Math.round(bestScores.length * PERCENTAGE_BEST_MATCHES / 100));
+
+	// Calculate the max length of the original and generated subtitles
+	// So we can calculate a normalized score for the length of the subtitle (longer is better, since longer subtitles have a lower chance to match with a wrong generated subtitle)
+	const maxOriginalLength = maxBy(srtEntriesOriginal, entry => entry.text.length)?.text?.length || 0;
+	const maxGeneratedLength = maxBy(srtEntriesGenerated, entry => entry.text.length)?.text?.length || 0;
+
+	// Compute the differences between the original subtitle index and the generated subtitle index
+	const indexDistances = bestScores.map(score => score.generatedIndex - score.originalIndex);
+
+	// Compute a histogram, since most subtitles will fall into some specified range. Any outliers can be removed
+	const histogram = calculateHistogram(indexDistances, { numberOfBins: NUMBER_OF_HISTOGRAM_BINS });
+	const maxHistogramCount: number = maxBy(histogram, histogramEntry => histogramEntry.count)?.count || 0;
+
+	if (maxHistogramCount === 0) {
+		throw new Error('histogram max count is zero. Are the subtitle entries empty or have no text?');
+	}
+
+	const bestScoresSorted = sortBy(bestScores, (bestScore) => {
+		const matchScore: normalizedScore = bestScore.score;
+		const originalLengthScore: normalizedScore = srtEntriesOriginal[bestScore.originalIndex].text.length / maxOriginalLength;
+		const generatedLengthScore: normalizedScore = srtEntriesGenerated[bestScore.generatedIndex].text.length / maxGeneratedLength;
+		const histogramScore: normalizedScore = getHistogramScore(bestScore.generatedIndex - bestScore.originalIndex, histogram) / maxHistogramCount;
+
+		return matchScore * STRING_SIMILARITY_SCORE_MULTIPLIER *
+			originalLengthScore * ORIGINAL_LENGTH_SCORE_MULTIPLIER *
+			generatedLengthScore * GENERATED_LENGTH_SCORE_MULTIPLIER *
+			histogramScore * INDEX_DIFFERENCE_HISTOGRAM_SCORE_MULTIPLIER;
+	});
+
+
+	const bestScoresPins = take(reverse(bestScoresSorted), Math.round(bestScores.length * PERCENTAGE_BEST_MATCHES / 100));
 	bestScoresPins.forEach(bestScorePin => {
 		mapSubtitleTiming(
 			srtEntriesOriginal[bestScorePin.originalIndex],
@@ -264,21 +355,28 @@ function reSyncSubtitle(srtEntriesOriginal: SubtitleEntry[], srtEntriesGenerated
 		srtEntriesSynced[bestScorePin.originalIndex].synced = true;
 	});
 
-	// // Run over the remaining pins and apply linear interpolation between their 2 nearest synced subtitle neighbors
-	// srtEntriesSynced.forEach((subtitleEntrySynced, indexSynced) => {
-	// 	try {
-	// 		if (!subtitleEntrySynced.synced) {
-	// 			const subtitleEntrySyncedLeftIndex = findIndexOfLeftNeighbor(srtEntriesSynced, indexSynced);
-	// 			const subtitleEntrySyncedRightIndex = findIndexOfRightNeighbor(srtEntriesSynced, indexSynced);
-	// 			interpolateSubtitleTiming(
-	// 				srtEntriesOriginal[subtitleEntrySyncedLeftIndex], srtEntriesOriginal[indexSynced], srtEntriesOriginal[subtitleEntrySyncedRightIndex],
-	// 				srtEntriesSynced[subtitleEntrySyncedLeftIndex], srtEntriesSynced[indexSynced], srtEntriesSynced[subtitleEntrySyncedRightIndex]
-	// 			);
-	// 		}
-	// 	} catch (err) {
-	// 		console.error('Failed to sync subtitle. continuing...', subtitleEntrySynced);
-	// 	}
-	// });
+	// Run over the remaining pins and apply linear interpolation between their 2 nearest synced subtitle neighbors
+	srtEntriesSynced.forEach((subtitleEntrySynced, indexSynced) => {
+		try {
+			if (!subtitleEntrySynced.synced) {
+				const subtitleEntrySyncedLeftIndex = findIndexOfLeftNeighbor(srtEntriesSynced, indexSynced);
+				const subtitleEntrySyncedRightIndex = findIndexOfRightNeighbor(srtEntriesSynced, indexSynced);
+				if (isNil(subtitleEntrySyncedLeftIndex) || isNil(subtitleEntrySyncedRightIndex)) {
+					// Use 2 close by synced entries to extrapolate the timing
+					// TODO
+				} else {
+					interpolateSubtitleTiming(
+						srtEntriesOriginal[subtitleEntrySyncedLeftIndex], srtEntriesOriginal[indexSynced], srtEntriesOriginal[subtitleEntrySyncedRightIndex],
+						srtEntriesSynced[subtitleEntrySyncedLeftIndex], srtEntriesSynced[indexSynced], srtEntriesSynced[subtitleEntrySyncedRightIndex]
+					);
+				}
+			}
+		} catch (err) {
+			console.error('Failed to sync subtitle. continuing...', subtitleEntrySynced);
+		}
+	});
+
+	// TODO Use 2 close by synced entries to extrapolate the timing
 
 	srtEntriesSynced.forEach((subtitleEntrySynced) => {
 		// Wait with setting subtitle entries as synced, until all items have been interpolated

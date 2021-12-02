@@ -1,6 +1,6 @@
 import { isNil } from 'lodash';
 import { SubtitleEntry, SubtitleEntrySynced } from './types';
-import { arraystat } from './arraystat';
+import { calculateHistogram } from './utils/histogram';
 
 const asciiHistogram = require('./ascii-histogram');
 const { createCanvas } = require('canvas');
@@ -129,8 +129,8 @@ export function drawSeries(path: string, series: SubtitleEntry[][]) {
 					indexDistances.push(entry.generatedIndex - entryIndex);
 				}
 			});
-			const histogram = arraystat(indexDistances, { numberOfBins: 200 }).histogram;
-			console.log(asciiHistogram(Object.fromEntries(histogram.map(histogramItem => [histogramItem.min + ' - ' + histogramItem.max, histogramItem.nb])), {
+			const histogram = calculateHistogram(indexDistances, { numberOfBins: 200 });
+			console.log(asciiHistogram(Object.fromEntries(histogram.map(histogramItem => [histogramItem.min + ' - ' + histogramItem.max, histogramItem.count])), {
 				bar: '=',
 				width: 40,
 				sort: false
