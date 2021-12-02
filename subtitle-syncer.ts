@@ -241,7 +241,7 @@ function findIndexOfLeftNeighbor(entries: SubtitleEntrySynced[], startIndex: num
 	let index = startIndex;
 	do {
 		index--;
-	} while (!entries[index].synced && index >= 0);
+	} while (index >= 0 && !entries[index].synced);
 
 	if (index < 0) {
 		return null; // entry doesn't have a left neighbor that is already synced. We'll have to figure out the timing using extrapolation.
@@ -253,7 +253,7 @@ function findIndexOfRightNeighbor(entries: SubtitleEntrySynced[], startIndex: nu
 	let index = startIndex;
 	do {
 		index++;
-	} while (!entries[index].synced && index < entries.length);
+	} while (index < entries.length && !entries[index].synced);
 
 	if (index === entries.length) {
 		return null; // entry doesn't have a right neighbor that is already synced. We'll have to figure out the timing using extrapolation.
@@ -277,7 +277,7 @@ function interpolateSubtitleTiming(
 ) {
 	const originalLeftTiming = subtitleEntryOriginalLeft.end;
 	const originalCurrentTiming = getCenterOfSubtitle(subtitleEntryOriginalCurrent);
-	const originalRightTiming = subtitleEntryOriginalLeft.start;
+	const originalRightTiming = subtitleEntryOriginalRight.start;
 	const syncedLeftTiming = subtitleEntrySyncedLeft.end;
 	const syncedRightTiming = subtitleEntrySyncedRight.start;
 
